@@ -15,14 +15,11 @@ import androidx.appcompat.app.AppCompatActivity
 import kotlinx.android.synthetic.main.activity_main.*
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.*
 
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), SensorEventListener {
     private val PERMISSION_CODE = 1000
-
-//    val mSensorManager = getSystemService(SENSOR_SERVICE) as SensorManager;
-//    val mHeartRateSensor = mSensorManager.getDefaultSensor(Sensor.TYPE_HEART_RATE);
-//    var sensorEventListener: SensorEventListener? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,8 +48,33 @@ class MainActivity : AppCompatActivity() {
             start_button.isEnabled = false;
             var finished_flag = false;
 
-            //sensor activation
-            //mSensorManager.registerListener(sensorEventListener, mHeartRateSensor, 1000);
+            //gravity sensor
+            mgr.getDefaultSensor(Sensor.TYPE_GRAVITY).also { gravitySensor ->
+                mgr.registerListener(this, gravitySensor,
+                    SensorManager.SENSOR_DELAY_NORMAL,
+                    SensorManager.SENSOR_DELAY_UI)
+            }
+
+            //accelerometer sensor
+            mgr.getDefaultSensor(Sensor.TYPE_ACCELEROMETER).also { accelerometerSensor ->
+                mgr.registerListener(this, accelerometerSensor,
+                    SensorManager.SENSOR_DELAY_NORMAL,
+                    SensorManager.SENSOR_DELAY_UI)
+            }
+
+            //hearth rate sensor
+            mgr.getDefaultSensor(Sensor.TYPE_HEART_RATE).also { hearthRateSensor ->
+                mgr.registerListener(this, hearthRateSensor,
+                    SensorManager.SENSOR_DELAY_NORMAL,
+                    SensorManager.SENSOR_DELAY_UI)
+            }
+
+            //temperature sensor
+            mgr.getDefaultSensor(Sensor.TYPE_AMBIENT_TEMPERATURE).also { temperatureSensor ->
+                mgr.registerListener(this, temperatureSensor,
+                    SensorManager.SENSOR_DELAY_NORMAL,
+                    SensorManager.SENSOR_DELAY_UI)
+            }
 
             val mChronometer = findViewById<Chronometer>(R.id.view_timer)
             mChronometer.base = SystemClock.elapsedRealtime()
@@ -78,16 +100,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
-//
-//    fun onSensorChanged(event: SensorEvent) {
-//        if (event.sensor.type == Sensor.TYPE_HEART_RATE) {
-//            val msg = "" + event.values[0].toInt()
-//            val builder = AlertDialog.Builder(this)
-//            builder.setTitle("Info")
-//            builder.setMessage(msg)
-//            builder.show()
-//        } else Log.d("Sensor data", "Unknown sensor type")
-//    }
 
     fun sendGet() {
         //val url = URL("http://www.google.com/")
@@ -104,5 +116,20 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+        if (sensor != null) {
+            if (sensor.name != "Acceleration Sensor" && sensor.name != "Gravity Sensor" && sensor.name != "LSM6DSL Acceleration Sensor")
+                Log.d("SENSORS", "sensor ${sensor.name}, onAccuracyChanged: $accuracy")
+        }
+        var x = 5;
+    }
+
+    override fun onSensorChanged(event: SensorEvent) {
+        if (event.sensor.name != "Acceleration Sensor" && event.sensor.name != "Gravity Sensor" && event.sensor.name != "LSM6DSL Acceleration Sensor") {
+            Log.d("SENSORS", "sensor ${event.sensor.name}, onSensorChanged: The values are ${Arrays.toString(event.values)}")
+        }
+        var x = 5;
     }
 }
