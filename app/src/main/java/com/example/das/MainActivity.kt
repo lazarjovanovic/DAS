@@ -1,22 +1,33 @@
 package com.example.das
 
 import android.Manifest
+import android.app.Activity
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.content.Context
 import android.content.DialogInterface
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
 import android.os.Bundle
+import android.os.ParcelUuid
 import android.os.SystemClock
 import android.util.Log
 import android.widget.Chronometer
 import android.widget.Chronometer.OnChronometerTickListener
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.samsung.android.sdk.healthdata.*
-import com.samsung.android.sdk.healthdata.HealthConstants.Exercise
-import com.samsung.android.sdk.healthdata.HealthConstants.StepDailyTrend
 import com.samsung.android.sdk.healthdata.HealthDataStore.ConnectionListener
 import com.samsung.android.sdk.healthdata.HealthPermissionManager.PermissionKey
 import com.samsung.android.sdk.healthdata.HealthPermissionManager.PermissionType
@@ -25,9 +36,14 @@ import java.lang.Boolean
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.*
+import java.util.UUID
 
 
 class MainActivity : AppCompatActivity(), SensorEventListener {
+    private val ENVIRONMENTAL_SERVICE_UUID = UUID.randomUUID()
+    private val ENABLE_BLUETOOTH_REQUEST_CODE = 1
+    private val LOCATION_PERMISSION_REQUEST_CODE = 2
+
     private val PERMISSION_CODE = 1000
 
     val APP_TAG = "SimpleHealth"
@@ -69,6 +85,42 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         alert.show()
     }
 
+    private fun readTodayStepCountData() {
+//        val filter: HealthDataResolver.Filter = HealthDataResolver.Filter.and(
+//            HealthDataResolver.Filter.eq(StepDailyTrend.DAY_TIME, getTodayStartUtcTime()),
+//            HealthDataResolver.Filter.eq(StepDailyTrend.SOURCE_TYPE, StepDailyTrend.SOURCE_TYPE_ALL)
+//        )
+
+        val request: HealthDataResolver.ReadRequest = HealthDataResolver.ReadRequest.Builder() // Set the data type
+            //.setDataType(StepDailyTrend.HEALTH_DATA_TYPE) // Set a filter
+            .setDataType(HealthConstants.StepCount.HEALTH_DATA_TYPE)
+            //.setFilter(filter)
+            .build()
+
+        var mResolver = HealthDataResolver(mStore, null)
+
+        try {
+            //val rez = mResolver.read(request)
+            var x = 6
+            mResolver.read(request).setResultListener{result ->
+                run {
+                    try {
+                        var iter: Iterator<HealthData> = result.iterator()
+                        while (iter.hasNext()) {
+                            var data: HealthData = iter.next()
+                            Log.d(APP_TAG, data.toString())
+                        }
+                    } catch (e: java.lang.Exception) {
+                        Log.e(APP_TAG, e.toString());
+                    }
+                }
+            }
+            x = 5
+        } catch (e: java.lang.Exception) {
+            Log.e(APP_TAG, e.toString());
+        }
+    }
+
     private val mPermissionListener: HealthResultHolder.ResultListener<HealthPermissionManager.PermissionResult> = object : HealthResultHolder.ResultListener<HealthPermissionManager.PermissionResult>
     {
         override fun onResult(result: HealthPermissionManager.PermissionResult)
@@ -81,6 +133,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 // Requesting permission fails
             } else {
                 var x = 5;
+                readTodayStepCountData()
                 // Get the current step count and display it
             }
         }
@@ -101,6 +154,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     var x = 5;
                 } else {
                     var x = 5;
+                    readTodayStepCountData()
                     // Get the current step count and display it
                     // ...
                 }
@@ -121,26 +175,26 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
 
-    private var mStore1: HealthDataStore? = null
-    var mKeys1: HashSet<PermissionKey> = HashSet()
-
-    private val APP_TAG1 = "MyApp"
-
-    fun requestPermission() {
-        mStore1 = HealthDataStore(this, mConnectionListener)
-        mStore1!!.connectService();
-        // Acquire permission
-        val pmsManager1 = HealthPermissionManager(mStore1)
-        mKeys1.add(PermissionKey(Exercise.HEALTH_DATA_TYPE, PermissionType.READ))
-        mKeys1.add(PermissionKey(Exercise.HEALTH_DATA_TYPE, PermissionType.WRITE))
-        mKeys1.add(PermissionKey(StepDailyTrend.HEALTH_DATA_TYPE, PermissionType.READ))
-        try {
-            pmsManager1.requestPermissions(mKeys1, this@MainActivity)
-                .setResultListener(mPermissionListener)
-        } catch (e: java.lang.Exception) {
-            Log.d(APP_TAG1, "requestPermissions() fails")
-        }
-    }
+//    private var mStore1: HealthDataStore? = null
+//    var mKeys1: HashSet<PermissionKey> = HashSet()
+//
+//    private val APP_TAG1 = "MyApp"
+//    fun requestPermission() {
+//        mStore1 = HealthDataStore(this, mConnectionListener)
+//        mStore1!!.connectService();
+//        // Acquire permission
+//        val pmsManager1 = HealthPermissionManager(mStore1)
+//        mKeys1.add(PermissionKey(Exercise.HEALTH_DATA_TYPE, PermissionType.READ))
+//        mKeys1.add(PermissionKey(Exercise.HEALTH_DATA_TYPE, PermissionType.WRITE))
+//        mKeys1.add(PermissionKey(StepDailyTrend.HEALTH_DATA_TYPE, PermissionType.READ))
+//        try {
+//            pmsManager1.requestPermissions(mKeys1, this@MainActivity)
+//                .setResultListener(mPermissionListener)
+//            var x = 5
+//        } catch (e: java.lang.Exception) {
+//            Log.d(APP_TAG1, "requestPermissions() fails")
+//        }
+//    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -151,7 +205,18 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         ////////////////////////////////////////////////////////////
         mInstance = this
         mKeySet = HashSet()
-        (mKeySet as HashSet<PermissionKey>).add(PermissionKey(HealthConstants.StepCount.HEALTH_DATA_TYPE, PermissionType.READ))
+        (mKeySet as HashSet<PermissionKey>).add(
+            PermissionKey(
+                HealthConstants.StepCount.HEALTH_DATA_TYPE,
+                PermissionType.READ
+            )
+        )
+//        (mKeySet as HashSet<PermissionKey>).add(
+//            PermissionKey(
+//                HealthConstants.OxygenSaturation.HEALTH_DATA_TYPE,
+//                PermissionType.READ
+//            )
+//        )
         // Create a HealthDataStore instance and set its listener
         mStore = HealthDataStore(this, mConnectionListener)
         // Request the connection to the health data store
@@ -240,6 +305,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 }
             }
         }
+
+        start_scan.setOnClickListener {
+            if (isScanning) {
+                stopBleScan()
+            }
+            else
+            {
+                startBleScan()
+            }
+        }
     }
 
     fun sendGet() {
@@ -279,4 +354,157 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         var x = 5;
     }
+
+    //blutetooth section
+    private val bluetoothAdapter: BluetoothAdapter by lazy {
+        val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        bluetoothManager.adapter
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!bluetoothAdapter.isEnabled) {
+            promptEnableBluetooth()
+        }
+    }
+
+    private fun promptEnableBluetooth() {
+        if (!bluetoothAdapter.isEnabled) {
+            val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+            startActivityForResult(enableBtIntent, ENABLE_BLUETOOTH_REQUEST_CODE)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        when (requestCode) {
+            ENABLE_BLUETOOTH_REQUEST_CODE -> {
+                if (resultCode != Activity.RESULT_OK) {
+                    promptEnableBluetooth()
+                }
+            }
+        }
+    }
+
+    val isLocationPermissionGranted
+        get() = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+
+    fun Context.hasPermission(permissionType: String): kotlin.Boolean {
+        return ContextCompat.checkSelfPermission(this, permissionType) ==
+                PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun startBleScan() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isLocationPermissionGranted) {
+            requestLocationPermission()
+        }
+        else {
+            //scanResults.clear()
+            //scanResultAdapter.notifyDataSetChanged()
+            bleScanner.startScan(null, scanSettings, scanCallback)
+            isScanning = true
+        }
+    }
+
+    private fun requestLocationPermission() {
+        if (isLocationPermissionGranted) {
+            return
+        }
+        runOnUiThread {
+            println("Location permission required")
+            requestPermission(Manifest.permission.ACCESS_FINE_LOCATION, LOCATION_PERMISSION_REQUEST_CODE)
+            var x = 5
+//            alert {
+//                title = "Location permission required"
+//                message = "Starting from Android M (6.0), the system requires apps to be granted " +
+//                        "location access in order to scan for BLE devices."
+//                isCancelable = false
+//                positiveButton(android.R.string.ok) {
+//                    requestPermission(
+//                        Manifest.permission.ACCESS_FINE_LOCATION,
+//                        LOCATION_PERMISSION_REQUEST_CODE
+//                    )
+//                }
+//            }.show()
+        }
+    }
+
+    private fun Activity.requestPermission(permission: String, requestCode: Int) {
+        ActivityCompat.requestPermissions(this, arrayOf(permission), requestCode)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        when (requestCode) {
+            LOCATION_PERMISSION_REQUEST_CODE -> {
+                if (grantResults.firstOrNull() == PackageManager.PERMISSION_DENIED) {
+                    requestLocationPermission()
+                } else {
+                    startBleScan()
+                }
+            }
+        }
+    }
+
+    val filter = ScanFilter.Builder().setServiceUuid(
+        ParcelUuid.fromString(ENVIRONMENTAL_SERVICE_UUID.toString())
+    ).build()
+
+
+    private val bleScanner by lazy {
+        bluetoothAdapter.bluetoothLeScanner
+    }
+
+    private val scanSettings = ScanSettings.Builder()
+        .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+        .build()
+
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            with(result.device) {
+                Log.d("ScanCallback", "Found BLE device! Name: ${name ?: "Unnamed"}, address: $address")
+            }
+        }
+    }
+
+    private var isScanning = false
+        set(value) {
+            field = value
+            runOnUiThread { start_scan.text = if (value) "Stop Scan" else "Start Scan" }
+        }
+
+    private fun stopBleScan() {
+        bleScanner.stopScan(scanCallback)
+        isScanning = false
+    }
+
+    private val scanResults = mutableListOf<ScanResult>()
+    private val scanResultAdapter: ScanResultAdapter by lazy {
+        ScanResultAdapter(scanResults) {
+            // TODO: Implement
+        }
+    }
+
+//    private val scanCallback = object : ScanCallback() {
+//        override fun onScanResult(callbackType: Int, result: ScanResult) {
+//            val indexQuery = scanResults.indexOfFirst { it.device.address == result.device.address }
+//            if (indexQuery != -1) { // A scan result already exists with the same address
+//                scanResults[indexQuery] = result
+//                scanResultAdapter.notifyItemChanged(indexQuery)
+//            } else {
+//                with(result.device) {
+//                    Log.d("ScanCallback", "Found BLE device! Name: ${name ?: "Unnamed"}, address: $address")
+//                }
+//                scanResults.add(result)
+//                scanResultAdapter.notifyItemInserted(scanResults.size - 1)
+//            }
+//        }
+//        override fun onScanFailed(errorCode: Int) {
+//            Log.d("ScanCallback", "onScanFailed: code $errorCode")
+//        }
+//    }
 }
