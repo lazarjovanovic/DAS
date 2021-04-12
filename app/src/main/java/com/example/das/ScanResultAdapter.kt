@@ -1,9 +1,8 @@
 package com.example.das
 
-import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 
-class ScanResultAdapter(scanResults: MutableList<ScanResult>, function: () -> Unit) {
+class ScanResultAdapter(scanResults: MutableList<ScanResult>, function: (Any?) -> Unit) {
     fun notifyDataSetChanged() {
         TODO("Not yet implemented")
     }
@@ -15,4 +14,5 @@ class ScanResultAdapter(scanResults: MutableList<ScanResult>, function: () -> Un
     fun notifyItemInserted(i: Int) {
 
     }
+
 }

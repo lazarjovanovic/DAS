@@ -2,8 +2,7 @@ package com.example.das
 
 import android.Manifest
 import android.app.Activity
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothManager
+import android.bluetooth.*
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
@@ -16,10 +15,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.os.Build
-import android.os.Bundle
-import android.os.ParcelUuid
-import android.os.SystemClock
+import android.os.*
 import android.util.Log
 import android.widget.Chronometer
 import android.widget.Chronometer.OnChronometerTickListener
@@ -463,13 +459,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
         .build()
 
-    private val scanCallback = object : ScanCallback() {
-        override fun onScanResult(callbackType: Int, result: ScanResult) {
-            with(result.device) {
-                Log.d("ScanCallback", "Found BLE device! Name: ${name ?: "Unnamed"}, address: $address")
-            }
-        }
-    }
+//    private val scanCallback = object : ScanCallback() {
+//        override fun onScanResult(callbackType: Int, result: ScanResult) {
+//            with(result.device) {
+//                Log.d("ScanCallback", "Found BLE device! Name: ${name ?: "Unnamed"}, address: $address")
+//            }
+//        }
+//    }
 
     private var isScanning = false
         set(value) {
@@ -484,27 +480,152 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private val scanResults = mutableListOf<ScanResult>()
     private val scanResultAdapter: ScanResultAdapter by lazy {
-        ScanResultAdapter(scanResults) {
-            // TODO: Implement
+        ScanResultAdapter(scanResults) { result ->
+            // User tapped on a scan result
+            if (isScanning) {
+                stopBleScan()
+            }
+            val x = 5
+//            with(result.device) {
+//                Log.w("ScanResultAdapter", "Connecting to $address")
+//                connectGatt(context, false, gattCallback)
+//            }
         }
     }
 
-//    private val scanCallback = object : ScanCallback() {
-//        override fun onScanResult(callbackType: Int, result: ScanResult) {
-//            val indexQuery = scanResults.indexOfFirst { it.device.address == result.device.address }
-//            if (indexQuery != -1) { // A scan result already exists with the same address
-//                scanResults[indexQuery] = result
-//                scanResultAdapter.notifyItemChanged(indexQuery)
-//            } else {
-//                with(result.device) {
-//                    Log.d("ScanCallback", "Found BLE device! Name: ${name ?: "Unnamed"}, address: $address")
-//                }
-//                scanResults.add(result)
-//                scanResultAdapter.notifyItemInserted(scanResults.size - 1)
-//            }
-//        }
-//        override fun onScanFailed(errorCode: Int) {
-//            Log.d("ScanCallback", "onScanFailed: code $errorCode")
-//        }
-//    }
+    private val gattCallback = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            val deviceAddress = gatt.device.address
+
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    Log.w("BluetoothGattCallback", "Successfully connected to $deviceAddress")
+                    var bluetoothGatt = gatt
+                    Handler(Looper.getMainLooper()).post {
+                        bluetoothGatt?.discoverServices()
+                    }
+
+                    var x = 5
+                    // TODO: Store a reference to BluetoothGatt
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    Log.w("BluetoothGattCallback", "Successfully disconnected from $deviceAddress")
+                    gatt.close()
+                }
+            } else {
+                Log.w("BluetoothGattCallback", "Error $status encountered for $deviceAddress! Disconnecting...")
+                gatt.close()
+            }
+        }
+
+        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+            with(gatt) {
+                Log.w("BluetoothGattCallback", "Discovered ${services.size} services for ${device.address}")
+                printGattTable() // See implementation just above this section
+                var x = 5
+                readBatteryLevel(gatt)
+                // Consider connection setup as complete here
+            }
+        }
+
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            with(characteristic) {
+                when (status) {
+                    BluetoothGatt.GATT_SUCCESS -> {
+                        //Log.i("BluetoothGattCallback", "Read characteristic $uuid:\n${value.toHexString()}")
+                        Log.i("BluetoothGattCallback", "Read characteristic $uuid:\n${value[0]}")
+                    }
+                    BluetoothGatt.GATT_READ_NOT_PERMITTED -> {
+                        Log.e("BluetoothGattCallback", "Read not permitted for $uuid!")
+                    }
+                    else -> {
+                        Log.e("BluetoothGattCallback", "Characteristic read failed for $uuid, error: $status")
+                    }
+                }
+            }
+        }
+    }
+
+    fun BluetoothGattCharacteristic.isReadable(): kotlin.Boolean =
+        containsProperty(BluetoothGattCharacteristic.PROPERTY_READ)
+
+    fun BluetoothGattCharacteristic.isWritable(): kotlin.Boolean =
+    containsProperty(BluetoothGattCharacteristic.PROPERTY_WRITE)
+
+    fun BluetoothGattCharacteristic.isWritableWithoutResponse(): kotlin.Boolean =
+        containsProperty(BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE)
+
+    fun BluetoothGattCharacteristic.containsProperty(property: Int): kotlin.Boolean {
+        return properties and property != 0
+    }
+
+    private fun readBatteryLevel(gatt: BluetoothGatt) {
+//        val batteryServiceUuid = UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb") // battery
+//        val batteryLevelCharUuid = UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
+
+        val batteryServiceUuid = UUID.fromString("00001822-0000-1000-8000-00805f9b34fb") // pulse oximeter
+        val batteryLevelCharUuid = UUID.fromString("00002a62-0000-1000-8000-00805f9b34fb")
+        var x = 5
+        val batteryLevelChar = gatt
+            .getService(batteryServiceUuid)?.getCharacteristic(batteryLevelCharUuid)
+        if (batteryLevelChar?.isReadable() == true) {
+            gatt.readCharacteristic(batteryLevelChar)
+        }
+        x = 6
+    }
+
+    private fun BluetoothGatt.printGattTable() {
+        if (services.isEmpty()) {
+            Log.i("printGattTable", "No service and characteristic available, call discoverServices() first?")
+            return
+        }
+        services.forEach { service ->
+            val characteristicsTable = service.characteristics.joinToString(
+                separator = "\n|--",
+                prefix = "|--"
+            ) { it.uuid.toString() }
+            Log.i("printGattTable", "\nService ${service.uuid}\nCharacteristics:\n$characteristicsTable"
+            )
+        }
+    }
+
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            val indexQuery = scanResults.indexOfFirst { it.device.address == result.device.address }
+            if (indexQuery != -1) { // A scan result already exists with the same address
+                scanResults[indexQuery] = result
+                scanResultAdapter.notifyItemChanged(indexQuery)
+            } else {
+                with(result.device) {
+                    Log.d("ScanCallback", "Found BLE device! Name: ${name ?: "Unnamed"}, address: $address")
+                }
+                scanResults.add(result)
+                scanResultAdapter.notifyItemInserted(scanResults.size - 1)
+
+                var rez_device_str = result.device.toString()
+                if(rez_device_str.equals("FF:2C:43:E7:64:E9"))
+                {
+                    with(result.device){
+                        Log.w("ScanResultAdapter", "Connecting to $address")
+                        var context: Context? = null
+                        var gatt = connectGatt(context, false, gattCallback)
+
+                        val batteryServiceUuid = UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb")
+
+                        val x = 5
+                    }
+                }
+                else
+                {
+                    val y = 5
+                }
+            }
+        }
+        override fun onScanFailed(errorCode: Int) {
+            Log.d("ScanCallback", "onScanFailed: code $errorCode")
+        }
+    }
 }
