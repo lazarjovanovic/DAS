@@ -15,8 +15,10 @@ data class AllData(
     @SerializedName("lacc_data")
     var lacc_data:ArrayList<LinearAccelerometerData> = arrayListOf(),
     @SerializedName("stepc_data")
-    var stepc_data:ArrayList<StepCounterData> = arrayListOf()) {
-
-
+    var stepc_data:ArrayList<StepCounterData> = arrayListOf(),
+    @SerializedName("location_data")
+    var location_data:ArrayList<LocationData> = arrayListOf(),
+    @SerializedName("weather_data")
+    var weather_data:ArrayList<WeatherData> = arrayListOf()){
 
 }
