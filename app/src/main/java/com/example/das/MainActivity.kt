@@ -26,15 +26,16 @@ import androidx.core.app.ActivityCompat
 import com.example.utils.*
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.gson.Gson
-import com.samsung.android.sdk.healthdata.HealthConnectionErrorResult
-import com.samsung.android.sdk.healthdata.HealthConstants
-import com.samsung.android.sdk.healthdata.HealthDataStore
-import com.samsung.android.sdk.healthdata.HealthPermissionManager.PermissionKey
-import com.samsung.android.sdk.healthdata.HealthPermissionManager.PermissionType
 import io.nlopez.smartlocation.OnLocationUpdatedListener
 import io.nlopez.smartlocation.SmartLocation
 import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers.IO
+import kotlinx.coroutines.Dispatchers.Main
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
 import java.lang.Exception
 import java.net.HttpURLConnection
 import java.net.URL
@@ -51,16 +52,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     private val ENABLE_BLUETOOTH_REQUEST_CODE = 1
     private val LOCATION_PERMISSION_REQUEST_CODE = 2
     private var location_service_started = false
+    private val localScope = CoroutineScope(SupervisorJob()+IO)
 
     private val PERMISSION_CODE = 1000
 
     val APP_TAG = "SimpleHealth"
 
     private var mInstance: MainActivity? = null
-    private var mStore: HealthDataStore? = null
-    private var mConnError: HealthConnectionErrorResult? = null
-    private var mKeySet: Set<PermissionKey>? = null
-    @Volatile var coroutines_finished = false
+    @ExperimentalCoroutinesApi var coroutines_finished = MutableStateFlow(false)
 
     enum class SensorType{
         GRAVITY, ACC, LACC, GYRO, HR, STEPC, LOC, WEATHER
@@ -113,16 +112,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
 
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         context = this
-        coroutines_finished = false
 
         mInstance = this
-        mKeySet = HashSet()
-        (mKeySet as HashSet<PermissionKey>).add(
-            PermissionKey(
-                HealthConstants.StepCount.HEALTH_DATA_TYPE,
-                PermissionType.READ
-            )
-        )
 
         val mgr = getSystemService(SENSOR_SERVICE) as SensorManager
         val sensors: List<Sensor> = mgr.getSensorList(Sensor.TYPE_ALL)
@@ -150,6 +141,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
 
             start_button.isEnabled = false;
             var finished_flag = false;
+            coroutines_finished.value = false
 
             //gravity sensor
             mgr.getDefaultSensor(Sensor.TYPE_GRAVITY).also { gravitySensor ->
@@ -250,56 +242,40 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
 
                             var loc_data = data[SensorType.LOC] as ArrayList<LocationData>
 
-                            try {
-                                for (i in 0..loc_data.size - 1) {
-                                    GlobalScope.launch {
-                                        suspend {
-                                            Log.d(
-                                                "coroutineScope",
-                                                "#runs on ${Thread.currentThread().name}"
-                                            )
-                                            sendWeatherGet(loc_data[i].lat, loc_data[i].lon)
-                                            delay(300)
-                                            if (data[SensorType.WEATHER]?.size == loc_data.size) {
-                                                coroutines_finished = true
-                                            }
-                                            withContext(Dispatchers.Main) {
-                                                Log.d(
-                                                    "coroutineScope",
-                                                    "#runs on ${Thread.currentThread().name}"
-                                                )
-                                            }
-                                        }.invoke()
+                            val value = localScope.launch {
+                                try {
+                                    for (i in 0 until loc_data.size)
+                                    {
+                                        sendWeatherGet(loc_data[i].lat, loc_data[i].lon)
+                                        delay(1000)
                                     }
+                                    coroutines_finished.value = true
                                 }
-                            }
-                            catch(e: Exception)
-                            {
-                                println(e)
-                            }
+                                catch (e: Throwable)
+                                {
+                                    println(e)
+                                }
 
-                            while(!coroutines_finished)
-                            {
-                                println("Waiting for coroutines")
                             }
 
-//                            loc_data?.forEach{it ->
-//                                GlobalScope.launch {
-//                                    suspend {
-//                                        Log.d("coroutineScope", "#runs on ${Thread.currentThread().name}")
-//                                        sendWeatherGet(it.lat, it.lon)
-//                                        delay(1)
-//                                        withContext(Dispatchers.Main) {
-//                                            Log.d("coroutineScope", "#runs on ${Thread.currentThread().name}")
-//                                        }
-//                                    }.invoke()
-//                                }
-//                            }
+                            localScope.launch {
+                                try{
+                                    while(!coroutines_finished.value)
+                                    {
+                                        delay(1000)
+                                    }
 
-                            val gson = Gson()
-                            val json = gson.toJson(all_data)
-                            val string = json
-                            println(string)
+                                    val gson = Gson()
+                                    val json_data = gson.toJson(all_data)
+                                    var response = postTrainingData(json_data)
+                                    var x = 5
+                                }
+                                catch (e: Throwable)
+                                {
+                                    println(e)
+                                }
+
+                            }
                         }
 
                         println("Timer finished")
@@ -311,7 +287,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                     }
                 }
             }
-            catch (e: java.lang.Exception)
+            catch (e: Throwable)
             {
                 //Log.e(APP_TAG, e.toString());
                 Log.e("ERROR", e.toString());
@@ -435,7 +411,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                                 WeatherData(
                                     System.currentTimeMillis(),
                                     w_data.weather[0].description,
-                                    w_data.mainOpenWeather.temp.toFloat(),
+                                    w_data.mainOpenWeather.temp.toFloat() - 273,
                                     w_data.mainOpenWeather.feels_like.toFloat() - 273,
                                     w_data.mainOpenWeather.temp_min.toFloat() - 273,
                                     w_data.mainOpenWeather.temp_max.toFloat() - 273,
@@ -451,9 +427,32 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                 }
             }
         }
-        catch (e: java.lang.Exception)
+        catch (e: Throwable)
         {
             println(e.toString())
+        }
+    }
+
+    fun postTrainingData(training_data: String): Response? {
+        try{
+            val url = "http://109.92.100.93:5000/process_exercise_test"
+
+            val client = OkHttpClient()
+
+            val JSON = "application/json; charset=utf-8".toMediaType()
+            val body = RequestBody.create(JSON, training_data)
+            val request = Request.Builder()
+                .url(url)
+                .post(body)
+                .build()
+
+            val  response = client.newCall(request).execute()
+            return response
+        }
+        catch (e: Exception)
+        {
+            println(e)
+            return null
         }
     }
 
