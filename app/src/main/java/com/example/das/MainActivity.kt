@@ -1,5 +1,6 @@
 package com.example.das
 
+import AnalysisDatapointData
 import Json4Kotlin_Base
 import android.Manifest
 import android.app.Activity
@@ -18,25 +19,24 @@ import android.os.SystemClock
 import android.util.Log
 import android.widget.Chronometer
 import android.widget.Chronometer.OnChronometerTickListener
-import android.widget.Toast
-import androidx.annotation.NonNull
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import com.example.utils.*
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.gson.Gson
-import io.nlopez.smartlocation.OnLocationUpdatedListener
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import io.nlopez.smartlocation.SmartLocation
 import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.Dispatchers.IO
 import kotlinx.coroutines.Dispatchers.Main
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
-import java.lang.Exception
+import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.*
@@ -52,14 +52,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     private val ENABLE_BLUETOOTH_REQUEST_CODE = 1
     private val LOCATION_PERMISSION_REQUEST_CODE = 2
     private var location_service_started = false
-    private val localScope = CoroutineScope(SupervisorJob()+IO)
+    private val localScope = CoroutineScope(SupervisorJob() + IO)
 
     private val PERMISSION_CODE = 1000
 
     val APP_TAG = "SimpleHealth"
 
     private var mInstance: MainActivity? = null
-    @ExperimentalCoroutinesApi var coroutines_finished = MutableStateFlow(false)
+    var coroutines_finished = MutableStateFlow(false)
 
     enum class SensorType{
         GRAVITY, ACC, LACC, GYRO, HR, STEPC, LOC, WEATHER
@@ -141,7 +141,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
 
             start_button.isEnabled = false;
             var finished_flag = false;
-            coroutines_finished.value = false
+            localScope.launch {
+                coroutines_finished.emit(false)
+            }
 
             //gravity sensor
             mgr.getDefaultSensor(Sensor.TYPE_GRAVITY).also { gravitySensor ->
@@ -249,7 +251,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                                         sendWeatherGet(loc_data[i].lat, loc_data[i].lon)
                                         delay(1000)
                                     }
-                                    coroutines_finished.value = true
+                                    coroutines_finished.emit(true)
                                 }
                                 catch (e: Throwable)
                                 {
@@ -258,7 +260,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
 
                             }
 
-                            localScope.launch {
+                            localScope.launch(IO) {
                                 try{
                                     while(!coroutines_finished.value)
                                     {
@@ -267,8 +269,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
 
                                     val gson = Gson()
                                     val json_data = gson.toJson(all_data)
-                                    var response = postTrainingData(json_data)
-                                    var x = 5
+                                    val response = postTrainingData(json_data)?.string()
+
+                                    //val adpList: List<AnalysisDatapointData> = gson.fromJson(response?.string() , Array<AnalysisDatapointData>::class.java).toList()
+                                    withContext(Main)
+                                    {
+                                        val intent = Intent(this@MainActivity, ResultingActivity::class.java)
+                                        val bundle = Bundle()
+                                        bundle.putString("datapoint", response)
+                                        intent.putExtras(bundle)
+                                        startActivity(intent)
+                                    }
                                 }
                                 catch (e: Throwable)
                                 {
@@ -433,9 +444,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
         }
     }
 
-    fun postTrainingData(training_data: String): Response? {
+    fun postTrainingData(training_data: String): ResponseBody? {
         try{
-            val url = "http://109.92.100.93:5000/process_exercise_test"
+            //val url = "http://109.92.100.93:5000/process_exercise"
+            val url = "http://192.168.85.159:5000/process_exercise"
 
             val client = OkHttpClient()
 
@@ -446,7 +458,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                 .post(body)
                 .build()
 
-            val  response = client.newCall(request).execute()
+            val response = client.newCall(request).execute().body
             return response
         }
         catch (e: Exception)
