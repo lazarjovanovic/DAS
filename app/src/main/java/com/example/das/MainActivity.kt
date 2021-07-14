@@ -4,6 +4,10 @@ import AnalysisDatapointData
 import Json4Kotlin_Base
 import android.Manifest
 import android.app.Activity
+import android.bluetooth.*
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -14,21 +18,24 @@ import android.hardware.SensorManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
-import android.os.Bundle
-import android.os.SystemClock
+import android.os.*
 import android.util.Log
 import android.widget.Chronometer
 import android.widget.Chronometer.OnChronometerTickListener
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.example.utils.*
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.polidea.rxandroidble2.RxBleClient
+import com.polidea.rxandroidble2.RxBleDevice
 import io.nlopez.smartlocation.SmartLocation
+import io.reactivex.disposables.Disposable
 import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.Dispatchers.IO
@@ -53,6 +60,62 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     private val LOCATION_PERMISSION_REQUEST_CODE = 2
     private var location_service_started = false
     private val localScope = CoroutineScope(SupervisorJob() + IO)
+
+    // region BLE
+    private var band_device_found = false
+    private var band_device: BluetoothDevice? = null
+    private var gatt:BluetoothGatt? = null
+    private val scanResults = mutableListOf<ScanResult>()
+    private var isScanning = false
+    val isLocationPermissionGranted
+        get() = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+    private val scanSettings = ScanSettings.Builder()
+        .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+        .build()
+    private val scanResultAdapter: ScanResultAdapter by lazy {
+        ScanResultAdapter(scanResults) { result ->
+            // User tapped on a scan result
+            if (isScanning) {
+                stopBleScan()
+            }
+        }
+    }
+    private val gattCallback = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            val deviceAddress = gatt.device.address
+
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    Log.w("BluetoothGattCallback", "Successfully connected to $deviceAddress")
+                    var bluetoothGatt = gatt
+                    Handler(Looper.getMainLooper()).post {
+                        bluetoothGatt?.discoverServices()
+                    }
+
+                    // TODO: Store a reference to BluetoothGatt
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    Log.w("BluetoothGattCallback", "Successfully disconnected from $deviceAddress")
+                    gatt.close()
+                }
+            } else {
+                Log.w(
+                    "BluetoothGattCallback",
+                    "Error $status encountered for $deviceAddress! Disconnecting..."
+                )
+                gatt.close()
+            }
+        }
+    }
+
+    private val bluetoothAdapter: BluetoothAdapter by lazy {
+        val bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        bluetoothManager.adapter
+    }
+
+    private val bleScanner by lazy {
+        bluetoothAdapter.bluetoothLeScanner
+    }
+    //endregion
 
     private val PERMISSION_CODE = 1000
 
@@ -110,6 +173,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        start_button.isEnabled = false;
+
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         context = this
 
@@ -136,7 +201,28 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
             requestPermissions(permission, PERMISSION_CODE)
         }
 
+        start_scan.setOnClickListener {
+            ScanTest()
+//            if (isScanning) {
+//                stopBleScan()
+//            }
+//            else
+//            {
+//                startBleScan()
+//            }
+        }
+
         start_button.setOnClickListener {
+            try
+            {
+                readBatteryLevel(gatt)
+            }
+            catch (e: Throwable)
+            {
+                var x = 5
+            }
+
+
             enumValues<SensorType>().forEach { data[it] = ArrayList() }
 
             start_button.isEnabled = false;
@@ -507,5 +593,148 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
         {
             Log.e(APP_TAG, e.toString());
         }
+    }
+
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            //while(!band_device_found)
+            val indexQuery = scanResults.indexOfFirst { it.device.address == result.device.address }
+            if (indexQuery != -1) { // A scan result already exists with the same address
+                scanResults[indexQuery] = result
+                scanResultAdapter.notifyItemChanged(indexQuery)
+            } else {
+                with(result.device) {
+                    Log.d(
+                        "ScanCallback",
+                        "Found BLE device! Name: ${name ?: "Unnamed"}, address: $address"
+                    )
+                }
+                scanResults.add(result)
+                scanResultAdapter.notifyItemInserted(scanResults.size - 1)
+
+                var rez_device_str = result.device.toString()
+                if(rez_device_str.equals("FF:2C:43:E7:64:E9")) // amazfit band 5
+                {
+                    with(result.device){
+                        gatt = connectGatt(context, false, gattCallback)
+                        Log.w("ScanResultAdapter", "Connecting to $address")
+                    }
+                    if(isScanning)
+                    {
+                        band_device_found = true
+                        band_device = result.device
+                        stopBleScan()
+                        start_button.isEnabled = true;
+                        start_scan.isEnabled = false;
+                    }
+                    isScanning = false
+                }
+            }
+        }
+        override fun onScanFailed(errorCode: Int) {
+            Log.d("ScanCallback", "onScanFailed: code $errorCode")
+        }
+    }
+
+    private fun startBleScan() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isLocationPermissionGranted) {
+            requestLocationPermission()
+        }
+        else {
+            bleScanner.startScan(null, scanSettings, scanCallback)
+            isScanning = true
+        }
+    }
+
+    private fun stopBleScan() {
+        bleScanner.stopScan(scanCallback)
+        isScanning = false
+    }
+
+    private fun requestLocationPermission() {
+        if (isLocationPermissionGranted) {
+            return
+        }
+        runOnUiThread {
+            println("Location permission required")
+            requestPermission(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                LOCATION_PERMISSION_REQUEST_CODE
+            )
+        }
+    }
+
+    private fun Activity.requestPermission(permission: String, requestCode: Int) {
+        ActivityCompat.requestPermissions(this, arrayOf(permission), requestCode)
+    }
+
+    fun Context.hasPermission(permissionType: String): kotlin.Boolean {
+        return ContextCompat.checkSelfPermission(this, permissionType) ==
+                PackageManager.PERMISSION_GRANTED
+    }
+
+    fun BluetoothGattCharacteristic.containsProperty(property: Int): kotlin.Boolean {
+        return properties and property != 0
+    }
+
+    fun BluetoothGattCharacteristic.isReadable(): kotlin.Boolean =
+        containsProperty(BluetoothGattCharacteristic.PROPERTY_READ)
+
+    private fun readBatteryLevel(gatt: BluetoothGatt?) {
+        // val batteryServiceUuid = UUID.fromString("00001822-0000-1000-8000-00805f9b34fb") // pulse oximeter
+        // val batteryLevelCharUuid = UUID.fromString("00002a62-0000-1000-8000-00805f9b34fb")
+        if (gatt != null)
+        {
+            //.discoverServices()
+            var list_services: List<BluetoothGattService> = gatt.services
+
+            val batteryServiceUuid = UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb") // battery
+            val batteryLevelCharUuid = UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
+            val batteryLevelChar = gatt
+                .getService(batteryServiceUuid)?.getCharacteristic(batteryLevelCharUuid)
+            if (batteryLevelChar?.isReadable() == true) {
+                gatt.readCharacteristic(batteryLevelChar)
+            }
+        }
+    }
+
+    fun ScanTest()
+    {
+        var context: Context = this;
+        var rxBleClient: RxBleClient? = RxBleClient.create(context)
+
+        val scanSettings = com.polidea.rxandroidble2.scan.ScanSettings.Builder().build()
+        val scanFilter = com.polidea.rxandroidble2.scan.ScanFilter.Builder().build()
+
+        val scanSubscription: Disposable? = rxBleClient?.scanBleDevices(scanSettings, scanFilter)
+            ?.subscribe { scanResult ->
+                var device_mac = scanResult.bleDevice.bluetoothDevice
+                var address = scanResult.bleDevice.bluetoothDevice.address
+                val batteryServiceUuid = UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb") //batery
+                //val batteryServiceUuid = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb") //heart rate
+                //val batteryServiceUuid = UUID.fromString("00002a62-0000-1000-8000-00805f9b34fb") //pulse oximeter
+                if(address.equals("FF:2C:43:E7:64:E9")) {
+                    Log.d("Here log", "Device found")
+
+                    /////////////////////////////////////////
+                    //https://github.com/Polidea/RxAndroidBle
+                    /////////////////////////////////////////
+
+                    val device: RxBleDevice = rxBleClient.getBleDevice(address)
+                    device.establishConnection(false)
+                        .flatMapSingle { rxBleConnection -> rxBleConnection.readCharacteristic(batteryServiceUuid) }
+//                        .flatMapSingle { rxBleConnection ->
+//                            rxBleConnection.discoverServices()
+//                        }
+                        .subscribe(
+                            { characteristicValue ->
+                                Log.d("value", characteristicValue.toString())
+                                val x = 5
+                            }
+                        ) { throwable ->
+                            Log.d("throwable", throwable.toString())
+                        }
+                }
+            }
     }
 }

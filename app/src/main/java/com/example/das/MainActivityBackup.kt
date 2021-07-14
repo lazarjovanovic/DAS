@@ -524,11 +524,11 @@
 //            field = value
 //            runOnUiThread { start_scan.text = if (value) "Stop Scan" else "Start Scan" }
 //        }
-//
 //    private fun stopBleScan() {
 //        bleScanner.stopScan(scanCallback)
 //        isScanning = false
 //    }
+//
 //
 //    private val scanResults = mutableListOf<ScanResult>()
 //    private val scanResultAdapter: ScanResultAdapter by lazy {
